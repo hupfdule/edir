@@ -15,6 +15,8 @@ import tempfile
 import itertools
 import shlex
 import pathlib
+import datetime
+import textwrap
 from collections import OrderedDict
 from shutil import rmtree, copy2, copytree
 
@@ -32,12 +34,18 @@ COLORS = {
     'remove': 'red',
     'rename': 'yellow',
     'copy': 'green',
+    'parse': 'cyan',
+    'error': 'bright_red bold',
 }
+
+ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
+COMMENT_LINE_REGEX = r'^\s*#'
 
 args = None
 gitfiles = set()
 counts = [0, 0]
 consoles = [None, None]
+actions_file = None
 
 def log(func, msg, *, error=False):
     'Output given message with appropriate color'
@@ -153,8 +161,7 @@ class Path:
         try:
             tempdir.mkdir(parents=True, exist_ok=True)
         except Exception:
-            print(f'Create dir for {self.diagrepr} ERROR: '
-                    f'Can not write in {tempdir.parent}', file=sys.stderr)
+            return f'Create dir for {self.diagrepr} ERROR: Can not write in {tempdir.parent}'
         else:
             self.temppath = self.inc_path(tempdir / self.newpath.name)
             self.tempdirs.add(tempdir)
@@ -204,6 +211,14 @@ class Path:
             return
 
         cls.paths.append(cls(path))
+
+    @classmethod
+    def get(cls, name):
+        'Get the file/dir with the given name'
+        for p in cls.paths:
+            if p.path.name == name:
+                return p
+        return None
 
     @classmethod
     def add(cls, name, expand):
@@ -261,6 +276,45 @@ class Path:
             else:
                 path.newpath = newpath
 
+    @classmethod
+    def read_actionsfile(cls, fp):
+        'Read the paths from an actions file'
+        for count, line in enumerate(fp, 1):
+            # Skip blank or commented lines
+            rawline = line.rstrip('\n\r')
+            line = rawline.lstrip()
+            if not line or line[0] == '#':
+                continue
+
+            match = re.search(ACTION_LINE_REGEX, line)
+            if match is None:
+                log('parse', f'unparsable line: {line}', error=True)
+                if line.count('→') > 0:
+                    log('parse', f'The arrow character (→) is not supported in file names when using an actions-file.', error=True)
+                to_actions_file_line(line)
+                continue
+
+            action    = match[1]
+            file_from = match[2]
+            file_to   = pathlib.Path(match[3]) if action != 'd' else None
+
+            path = Path.get(file_from)
+            if path is None:
+                Path.add(file_from, False)
+                path = Path.paths[-1]
+            if action == 'r':
+                path.newpath = file_to
+            elif action == 'c':
+                if not path.newpath:
+                    path.newpath = pathlib.Path(file_from)
+                path.copies.append(file_to)
+            elif action == 'd':
+                pass
+            else:
+                log('parse', f'unsupported action: {action}', error=True)
+                continue
+
+
 def editfile(filename):
     'Run the editor command'
     # Use explicit editor or choose default
@@ -276,7 +330,7 @@ def editfile(filename):
     if res.returncode != 0:
         sys.exit(f'ERROR: {editor} returned {res.returncode}')
 
-def main():
+def main(argv=[]):
     'Main code'
     global args
 
@@ -325,6 +379,8 @@ def main():
     opt.add_argument('-N', '--sort-name', dest='sort',
             action='store_const', const=1,
             help='sort paths in file by name, alphabetically')
+    opt.add_argument('-i', '--input-from', dest='actions_file',
+            help='read actions to execute from an the given actions file')
     opt.add_argument('-I', '--sort-time', dest='sort',
             action='store_const', const=2,
             help='sort paths in file by time, oldest first')
@@ -356,7 +412,7 @@ def main():
             cnflines = [re.sub(r'#.*$', '', line).strip() for line in fp]
         cnflines = ' '.join(cnflines).strip()
 
-    args = opt.parse_args(shlex.split(cnflines) + sys.argv[1:])
+    args = opt.parse_args(shlex.split(cnflines) + argv)
 
     if not args.no_color:
         try:
@@ -378,14 +434,38 @@ def main():
         if args.git and not gitfiles:
             opt.error('must be within a git repo to use -g/--git option')
 
-    # Set input list to a combination of arguments and stdin
-    filelist = args.args
-    if sys.stdin.isatty():
-        if not filelist:
-            filelist.append('.')
-    elif '-' not in filelist:
-        filelist.insert(0, '-')
+    # If an actions file was specified, run non-interactively and execute
+    # the actions specified in that file. Otherwise run interactively as usual.
+    if args.actions_file is None:
+        # Set input list to a combination of arguments and stdin
+        filelist = args.args
+        if sys.stdin.isatty():
+            if not filelist:
+                filelist.append('.')
+        elif '-' not in filelist:
+            filelist.insert(0, '-')
+        run_interactively(filelist)
+    else:
+        run_noninteractively(args.actions_file)
 
+    return perform_actions(Path.paths)
+
+def run_noninteractively(actions_file):
+    'Execute an actions file noninteractive use'
+    fpath = pathlib.Path(actions_file)
+    if not fpath.exists():
+        log("error", f'ERROR: {fpath} does not exist.', error=True)
+        sys.exit(3)
+
+    try:
+        with fpath.open() as fp:
+            Path.read_actionsfile(fp)
+    except OSError as err:
+        log("error", 'Error reading actions file {fpath}: {err}')
+        sys.exit(3)
+
+def run_interactively(filelist):
+    'Open the list of files in the editor for interactive use'
     # Iterate over all (unique) inputs to get a list of files/dirs
     for name in OrderedDict.fromkeys(filelist):
         if name == '-':
@@ -427,20 +507,28 @@ def main():
 
     # Reduce paths to only those that were removed or changed by the user
     paths = [p for p in Path.paths if p.path != p.newpath or p.copies]
+    Path.paths = paths
 
+def perform_actions(paths):
+    'Start the actual renaming/deleting/copying'
     # Pass 1: Rename all moved files & dirs to temps, delete all removed
     # files.
+
     for p in paths:
         # Lazy eval the next path value
         p.note = ' recursively' if p.is_dir and any(p.path.iterdir()) else ''
 
         if p.newpath:
             if p.newpath != p.path:
-                p.rename_temp()
+                err = p.rename_temp()
+                if err:
+                    log('rename', f'Rename "{p.diagrepr}" ERROR: {err}', error=True)
+                    to_actions_file('r', p.path, p.newpath)
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
                 log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                to_actions_file('d', p.path, None)
             else:
                 log('remove', f'Removed "{p.diagrepr}"')
 
@@ -464,6 +552,7 @@ def main():
             if err:
                 log('copy', f'Copy "{p.diagrepr}" to "{c}{appdash}"{p.note} '
                         f'ERROR: {err}', error=True)
+                to_actions_file('c', p.path, c)
             else:
                 log('copy', f'Copied "{p.diagrepr}" to "{c}{appdash}"{p.note}')
 
@@ -476,11 +565,122 @@ def main():
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
                 log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                to_actions_file('d', p.path, None)
             else:
                 log('remove', f'Removed "{p.diagrepr}"{p.note}')
+
+    # Show a prominent error message indicating that some actions failed
+    # and how to reexecute these.
+    if actions_file is not None:
+        log('error',
+        f"\nSome or all files could not be processed. An actions-file was written for them to \n" +
+        f"  {actions_file}\n" +
+        f"You can try to reapply those actions with \n" +
+        f"  edir -i {actions_file}",
+        error=True)
 
     # Return status code 0 = all good, 1 = some bad, 2 = all bad.
     return (1 if counts[0] > 0 else 2) if counts[1] > 0 else 0
 
+
+def to_actions_file(action, source_path, target_path):
+    """
+    Write an action to the actions file.
+
+    If the actions file does not exist yet, it will be created.
+
+    Parameters:
+        action (char):     the action to write (a single character)
+        source_path (str): the file to apply the action to
+        target_path (str): the result of the action (if action is != d)
+    """
+    if target_path is None:
+        to_actions_file_line(f"{action} {source_path}")
+    else:
+        to_actions_file_line(f"{action} {source_path} → {target_path}")
+
+
+def to_actions_file_line(line):
+    """
+    Write a line to the actions file.
+
+    If the actions file does not exist yet, it will be created.
+
+    Parameters:
+        line (str): the line to write
+    """
+    if not actions_file:
+        create_actions_file()
+
+    with open(actions_file, 'a') as f:
+        f.write(line + '\n')
+
+
+def create_actions_file():
+    """
+    Create an actions file.
+
+    The actions file will be created in the filesystem. Either in the
+    current directory or, if that fails, in a system-defined directory for
+    temporary files.
+
+    The actions file will already be filled with a leading comment
+    specifying the working directory when the file was created and some
+    info about the format of its entries.
+
+    The pathlib.Path to the actions file will be stored in the global
+    variable actions_file.
+    """
+    # First try to create the actions file in the current directory
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+    try:
+        fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", dir=".", text=True)
+    except Exception as err:
+        try:
+            fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", text=True)
+        except Exception as err:
+            log('error', 'ERROR: Cannot write actions file. Unfortunately, your changes are lost', error=True)
+            raise err
+
+    # now print the header into the file
+    with open(fp, 'w') as f:
+        f.writelines(textwrap.dedent(f"""\
+        # workdir: {os.getcwd()}
+        #
+        # Be careful when editing this file. The order of entries matters. Also the
+        # number of whitespace characters is significant.
+        #
+        # Format of this file:
+        #  operation  source file name  [single space  arrow  single space  new file name]
+        #  │          │                  │             │      │             │
+        #  │ ┌────────┘   ┌──────────────┘             │      │             │
+        #  │ │            │┌───────────────────────────┘      │             │
+        #  │ │            ││┌─────────────────────────────────┘             │
+        #  │ │            │││┌──────────────────────────────────────────────┘
+        #  │ │            ││││
+        #  ▼ ▼            ▼▼▼▼
+        #  d ./source file → ./target file
+        #
+        #  The possible operations are:
+        #  d: Delete (only the source file name is allowed as additional content then
+        #  r: Rename
+        #  c: Copy
+        #
+        #  The arrow symbol must be surrounded by exactly 1 space character on each
+        #  side. All other whitespace characters are recognized as parts of the
+        #  file name then.
+        #
+        #  As the arrow has a special meaning here, it is not possible to use it in
+        #  the actual file names. Escaping is not supported.
+        #
+        #  This file format is still subject to change.
+        #
+        #  Empty lines and lines starting with a hash mark (#) are ignored
+
+        """))
+    global actions_file
+    actions_file = pathlib.Path(path)
+
+
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
