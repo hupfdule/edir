@@ -32,7 +32,10 @@ COLORS = {
     'remove': 'red',
     'rename': 'yellow',
     'copy': 'green',
+    'parse': 'cyan',
 }
+
+ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
 
 args = None
 gitfiles = set()
@@ -261,6 +264,43 @@ class Path:
             else:
                 path.newpath = newpath
 
+    @classmethod
+    def read_actionsfile(cls, fp):
+        'Read the paths from an actions file'
+        for count, line in enumerate(fp, 1):
+            # Skip blank or commented lines
+            rawline = line.rstrip('\n\r')
+            line = rawline.lstrip()
+            if not line or line[0] == '#':
+                continue
+
+            match = re.search(ACTION_LINE_REGEX, line)
+            if match is None:
+                log('parse', f'unparsable line: {line}', error=True)
+                continue
+
+            action    = match[1]
+            file_from = match[2]
+            file_to   = pathlib.Path(match[3]) if action != 'd' else None
+
+            # FIXME: -mh- Was passiert, wenn ich eine Quelldatei mehrfach
+            # habe? Beispielsweise Kopie + Rename? Oder mehrere Kopien?
+            # Klappt das dann noch oder muss ich aufpassen, dass ich mir
+            # den bereits vorhandenen Pfad nicht überschreibe?
+            Path.add(file_from, False)
+            path = Path.paths[-1]
+            if action == 'r':
+                path.newpath = file_to
+            elif action == 'c':
+                path.newpath = pathlib.Path(file_from)
+                path.copies.append(file_to)
+            elif action == 'd':
+                pass
+            else:
+                log('parse', f'unsupported action: {action}', error=True)
+                continue
+
+
 def editfile(filename):
     'Run the editor command'
     # Use explicit editor or choose default
@@ -325,6 +365,8 @@ def main():
     opt.add_argument('-N', '--sort-name', dest='sort',
             action='store_const', const=1,
             help='sort paths in file by name, alphabetically')
+    opt.add_argument('-i', '--input-from', dest='actions_file',
+            help='read actions to execute from an the given actions file')
     opt.add_argument('-I', '--sort-time', dest='sort',
             action='store_const', const=2,
             help='sort paths in file by time, oldest first')
@@ -378,14 +420,36 @@ def main():
         if args.git and not gitfiles:
             opt.error('must be within a git repo to use -g/--git option')
 
-    # Set input list to a combination of arguments and stdin
-    filelist = args.args
-    if sys.stdin.isatty():
-        if not filelist:
-            filelist.append('.')
-    elif '-' not in filelist:
-        filelist.insert(0, '-')
+    # If an actions file was specified, run non-interactively and execute
+    # the actions specified in that file. Otherwise run interactively as usual.
+    if args.actions_file is None:
+        # Set input list to a combination of arguments and stdin
+        filelist = args.args
+        if sys.stdin.isatty():
+            if not filelist:
+                filelist.append('.')
+        elif '-' not in filelist:
+            filelist.insert(0, '-')
+        run_interactively(filelist)
+    else:
+        run_noninteractively(args.actions_file)
 
+    perform_actions(Path.paths)
+
+def run_noninteractively(actions_file):
+    'Execute an actions file noninteractive use'
+    fpath = pathlib.Path(actions_file)
+    if not fpath.exists():
+        sys.exit(f'ERROR: {fpath} does not exit.')
+
+    try:
+        with fpath.open() as fp:
+            Path.read_actionsfile(fp)
+    except OSError as err:
+        sys.exit(f'Error reading actions file {fpath}: {err}')
+
+def run_interactively(filelist):
+    'Open the list of files in the editor for interactive use'
     # Iterate over all (unique) inputs to get a list of files/dirs
     for name in OrderedDict.fromkeys(filelist):
         if name == '-':
@@ -427,7 +491,10 @@ def main():
 
     # Reduce paths to only those that were removed or changed by the user
     paths = [p for p in Path.paths if p.path != p.newpath or p.copies]
+    Path.paths = paths
 
+def perform_actions(paths):
+    'Start the actual renaming/deleting/copying'
     # Pass 1: Rename all moved files & dirs to temps, delete all removed
     # files.
     for p in paths:
