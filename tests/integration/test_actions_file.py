@@ -122,12 +122,12 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
             r file2 → file2renamed
             c file3 → file3copy
             """)
-        testdir = create_dir("testdir", [
-            "file1",
-            "file2",
-            "file3",
-            "file4",
-            ])
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
 
         # - test
 
@@ -143,10 +143,10 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         self.assertDirContainsExactly(
             testdir,
             {
-              'file2renamed': "file2content",
-              'file3':        "file3content",
-              'file3copy':    "file3content",
-              'file4':        "file4content",
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file3copy':    "file 3 content",
+              'file4':        "file 4 content",
             })
 
 
@@ -156,14 +156,21 @@ def create_dir(dirname, files):
 
     Parameters:
         dirname (string):    the directory to create (in the current working directory)
-        files   (list[str]): the names of the files to create
+        files   (dict):      a dictionary mapping the filenames to create to their content
     """
     os.mkdir(dirname)
-    for file in files:
-        create_file(dirname + "/" + file, file + "content")
+    for file, content in files.items():
+        create_file(dirname + "/" + file, content)
 
 
 def create_file(filename, content):
+    """
+    Create a file with the given "filename" and "content".
+
+    Parameters:
+        filename (str):              the name of the file to create
+        content  (str or list[str]): the content to write into the file
+    """
     file = pathlib.Path(filename)
     with file.open('w') as fp:
         fp.writelines(content)
