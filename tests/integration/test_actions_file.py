@@ -290,7 +290,44 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         """
         Test that a file may be renamed and copied (multiple times) at the same time.
         """
-        self.fail("no yet impl")
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            d file1
+            c file2 → file2copy
+            r file2 → file2renamed
+            c file3 → file3copy
+            c file3 → file3copy2
+            """)
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file2renamed': "file 2 content",
+              'file2copy':    "file 2 content",
+              'file3':        "file 3 content",
+              'file3copy':    "file 3 content",
+              'file3copy2':   "file 3 content",
+              'file4':        "file 4 content",
+            })
+
 
 
     def test_ignore_empty_and_comments_lines(self):
