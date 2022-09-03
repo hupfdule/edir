@@ -9,20 +9,21 @@ edir = __import__("edir")
 class CustomAssertions():
     """Custom assertions relevant for the edir integration tests."""
 
-    def list_dirs_recursively(self, path):
+    def list_dirs_recursively(self, path, only_files=False):
         result = []
         for root, dirs, files in os.walk(path):
-            print(f"VORHER: {root}")
-            root = root.removeprefix(path)
+            #print(f"VORHER: {root}")
+            root = root.removeprefix(path.name)
             root = root.removeprefix("/")
-            print(f"NACHER: {root}")
+            #print(f"NACHER: {root}")
             for name in files:
                 result.append(os.path.join(root, name))
-            for name in dirs:
-                result.append(os.path.join(root, name))
+            if not only_files:
+                for name in dirs:
+                    result.append(os.path.join(root, name))
         return result
 
-    def assertDirContainsExactly(self, path, files):
+    def assertDirContainsExactlyFiles(self, path, files):
         """
         Assert that "path" contains exactly the files specified in "files" with the specified content.
 
@@ -32,21 +33,17 @@ class CustomAssertions():
 
         Usage:
             path = pathlib.Path("the_directory")
-            self.assertDirContainsExactly(
+            self.assertDirContainsExactlyFiles(
                 path,
                 {
                   'file1.txt': "content of file 1",
                   'file2.txt': "content of file 2",
                 }
         """
-        # FIXME: Hier sollten wir den übergebenen "path" nehmen und nicht
-        #        das Verzeichnis selbst vorgeben.
-        actual_files = os.listdir(path)
-        #actual_files = self.list_dirs_recursively("testdir")
-        #print(f"AKT: {actual_files}")
-        #print(f"KSY: {files.keys()}")
-        #print(f"FLS: {files}")
-        self.assertListsEqual(actual_files, files.keys())
+        actual_files = self.list_dirs_recursively(path, True)
+        actual_files = [os.path.abspath(f) for f in actual_files]
+        expected_files = [os.path.abspath(f) for f in files.keys()]
+        self.assertListsEqual(actual_files, expected_files)
         for filename, content in files.items():
             file = path / filename
             self.assertFileContains(file, content)
@@ -162,7 +159,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - verification
 
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             testdir,
             {
               'file2renamed': "file 2 content",
@@ -201,7 +198,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - verification
 
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             testdir,
             {
               'file2renamed': "file 2 content",
@@ -241,7 +238,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - verification
 
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             testdir,
             {
               ' file with spaces inside and before': "file 2 content",
@@ -258,11 +255,13 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         # - preparation
 
         actions_file = create_file('actions_file', """
-            r testdir/file1 → other dir/file1
-            r testdir/file2 → testdir/subdir/file2renamed
-            c testdir/file3 → ./file3copy
+            r innerdir/file1 → other dir/file1
+            r innerdir/file2 → innerdir/subdir/file2renamed
+            c innerdir/file3 → ./file3copy
             """)
-        testdir = create_dir("testdir", {
+        testdir = create_dir("testdir", {})
+        os.chdir(testdir)
+        subdir = create_dir("innerdir", {
             "file1": "file 1 content",
             "file2": "file 2 content",
             "file3": "file 3 content",
@@ -271,19 +270,19 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - test
 
-        edir.main(['--quiet', '-i', str(actions_file), 'testdir'])
+        edir.main(['--quiet', '-i', str(actions_file)])
 
         # - verification
 
         # FIXME: Diese assert-Methode sollte auch Subdirectories gleich mit testen
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             pathlib.Path('.'),
             {
-              'other dir/file1':             "file 1 content",
-              'testdir/subdir/file2renamed': "file 2 content",
-              'testdir/file3':               "file 3 content",
-              'file3copy':                   "file 3 content",
-              'file4':                       "file 4 content",
+              'other dir/file1':              "file 1 content",
+              'innerdir/subdir/file2renamed': "file 2 content",
+              'innerdir/file3':               "file 3 content",
+              'file3copy':                    "file 3 content",
+              'innerdir/file4':               "file 4 content",
             })
 
 
@@ -329,7 +328,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - verification
 
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             testdir,
             {
               'file2renamed': "file 2 content",
@@ -375,7 +374,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # - verification
 
-        self.assertDirContainsExactly(
+        self.assertDirContainsExactlyFiles(
             testdir,
             {
               'file → 2': "file 2 content",
