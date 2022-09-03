@@ -41,14 +41,14 @@ class CustomAssertions():
         """
         # FIXME: Hier sollten wir den übergebenen "path" nehmen und nicht
         #        das Verzeichnis selbst vorgeben.
-        actual_files = os.listdir("testdir")
+        actual_files = os.listdir(path)
         #actual_files = self.list_dirs_recursively("testdir")
         #print(f"AKT: {actual_files}")
         #print(f"KSY: {files.keys()}")
         #print(f"FLS: {files}")
         self.assertListsEqual(actual_files, files.keys())
         for filename, content in files.items():
-            file = pathlib.Path("testdir") / filename
+            file = path / filename
             self.assertFileContains(file, content)
 
     def assertFileContains(self, file, content):
@@ -397,6 +397,8 @@ def create_dir(dirname, files):
     os.mkdir(dirname)
     for file, content in files.items():
         create_file(dirname + "/" + file, content)
+
+    return pathlib.Path(dirname)
 
 
 def create_file(filename, content):
