@@ -33,6 +33,7 @@ COLORS = {
     'rename': 'yellow',
     'copy': 'green',
     'parse': 'cyan',
+    'error': 'bright_red bold',
 }
 
 ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
@@ -316,7 +317,7 @@ def editfile(filename):
     if res.returncode != 0:
         sys.exit(f'ERROR: {editor} returned {res.returncode}')
 
-def main():
+def main(argv=[]):
     'Main code'
     global args
 
@@ -398,7 +399,7 @@ def main():
             cnflines = [re.sub(r'#.*$', '', line).strip() for line in fp]
         cnflines = ' '.join(cnflines).strip()
 
-    args = opt.parse_args(shlex.split(cnflines) + sys.argv[1:])
+    args = opt.parse_args(shlex.split(cnflines) + argv)
 
     if not args.no_color:
         try:
@@ -434,19 +435,21 @@ def main():
     else:
         run_noninteractively(args.actions_file)
 
-    perform_actions(Path.paths)
+    return perform_actions(Path.paths)
 
 def run_noninteractively(actions_file):
     'Execute an actions file noninteractive use'
     fpath = pathlib.Path(actions_file)
     if not fpath.exists():
-        sys.exit(f'ERROR: {fpath} does not exit.')
+        log("error", f'ERROR: {fpath} does not exist.')
+        sys.exit(3)
 
     try:
         with fpath.open() as fp:
             Path.read_actionsfile(fp)
     except OSError as err:
-        sys.exit(f'Error reading actions file {fpath}: {err}')
+        log("error", 'Error reading actions file {fpath}: {err}')
+        sys.exit(3)
 
 def run_interactively(filelist):
     'Open the list of files in the editor for interactive use'
@@ -550,4 +553,4 @@ def perform_actions(paths):
     return (1 if counts[0] > 0 else 2) if counts[1] > 0 else 0
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
