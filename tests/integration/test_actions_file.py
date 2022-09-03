@@ -9,6 +9,19 @@ edir = __import__("edir")
 class CustomAssertions():
     """Custom assertions relevant for the edir integration tests."""
 
+    def list_dirs_recursively(self, path):
+        result = []
+        for root, dirs, files in os.walk(path):
+            print(f"VORHER: {root}")
+            root = root.removeprefix(path)
+            root = root.removeprefix("/")
+            print(f"NACHER: {root}")
+            for name in files:
+                result.append(os.path.join(root, name))
+            for name in dirs:
+                result.append(os.path.join(root, name))
+        return result
+
     def assertDirContainsExactly(self, path, files):
         """
         Assert that "path" contains exactly the files specified in "files" with the specified content.
@@ -26,7 +39,13 @@ class CustomAssertions():
                   'file2.txt': "content of file 2",
                 }
         """
+        # FIXME: Hier sollten wir den übergebenen "path" nehmen und nicht
+        #        das Verzeichnis selbst vorgeben.
         actual_files = os.listdir("testdir")
+        #actual_files = self.list_dirs_recursively("testdir")
+        #print(f"AKT: {actual_files}")
+        #print(f"KSY: {files.keys()}")
+        #print(f"FLS: {files}")
         self.assertListsEqual(actual_files, files.keys())
         for filename, content in files.items():
             file = pathlib.Path("testdir") / filename
@@ -67,14 +86,14 @@ class CustomAssertions():
         for elm in expected:
             if not elm in actual:
                 raise AssertionError(f'''
-                Expected element "{file}" is missing.
+                Expected element "{elm}" is missing.
                 Actual elements: {actual}
                 ''')
 
         for elm in actual:
             if not elm in expected:
                 raise AssertionError(f'''
-                Actual element "{felement}" was not expected.
+                Actual element "{elm}" was not expected.
                 Expected elements: {expected}
                 ''')
 
@@ -96,6 +115,9 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         """Delete the temporary working dir and chdir to the previous working dir."""
         os.chdir(self.cwd)
         self.tmpdir.cleanup()
+
+        # FIXME: This is unclean. Path should not be used static inside edir
+        edir.Path.paths = []
 
 
     def test_actions_file_missing(self):
@@ -134,7 +156,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         try:
             cwd = os.getcwd()
             os.chdir("testdir")
-            edir.main(['-i', str(actions_file)])
+            edir.main(['--quiet', '-i', str(actions_file)])
         finally:
             os.chdir(cwd)
 
@@ -149,6 +171,220 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
               'file4':        "file 4 content",
             })
 
+
+    def test_absolute_and_relative_path_mixed(self):
+        """
+        Test the successful execute of all 3 possible operations where absolute paths are changed to relative paths and vice versa.
+        """
+        # - preparation
+
+        actions_file = create_file('actions_file', f"""
+            d ./file1
+            r {os.getcwd()}/testdir/file2 → ./file2renamed
+            c ./file3 → {os.getcwd()}/testdir/file3copy
+            """)
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactly(
+            testdir,
+            {
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file3copy':    "file 3 content",
+              'file4':        "file 4 content",
+            })
+
+
+
+    def test_spaces_in_filenames(self):
+        """
+        Test that filenames may contain spaces at the beginning, the end and in between.
+        """
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            d ./ file with leading spaces
+            r ./file with spaces inside → ./ file with spaces inside and before
+            c ./file with trailing spaces  → ./ file with spaces everywhere
+            """)
+        testdir = create_dir("testdir", {
+            " file with leading spaces": "file 1 content",
+            "file with spaces inside": "file 2 content",
+            "file with trailing spaces ": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactly(
+            testdir,
+            {
+              ' file with spaces inside and before': "file 2 content",
+              'file with trailing spaces ':          "file 3 content",
+              ' file with spaces everywhere':        "file 3 content",
+              'file4':                               "file 4 content",
+            })
+
+
+    def test_move_to_new_directory(self):
+        """
+        Test that the directory may be changed (even to not yet existing ones).
+        """
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            r testdir/file1 → other dir/file1
+            r testdir/file2 → testdir/subdir/file2renamed
+            c testdir/file3 → ./file3copy
+            """)
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        edir.main(['--quiet', '-i', str(actions_file), 'testdir'])
+
+        # - verification
+
+        # FIXME: Diese assert-Methode sollte auch Subdirectories gleich mit testen
+        self.assertDirContainsExactly(
+            pathlib.Path('.'),
+            {
+              'other dir/file1':             "file 1 content",
+              'testdir/subdir/file2renamed': "file 2 content",
+              'testdir/file3':               "file 3 content",
+              'file3copy':                   "file 3 content",
+              'file4':                       "file 4 content",
+            })
+
+
+    def test_multiple_operations_on_same_file(self):
+        """
+        Test that a file may be renamed and copied (multiple times) at the same time.
+        """
+        self.fail("no yet impl")
+
+
+    def test_ignore_empty_and_comments_lines(self):
+        """
+        Test that comments and empty lines are being ignored.
+        """
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            # This is a comment line
+
+            # This is another comment line
+            d file1
+
+            r file2 → file2renamed
+
+            # Even more comments… → with special characters
+            c file3 → file3copy
+            """)
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactly(
+            testdir,
+            {
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file3copy':    "file 3 content",
+              'file4':        "file 4 content",
+            })
+
+
+    def test_arrow_in_filenames(self):
+        """
+        Test that the special arrow is not allowed as a character in filenames.
+        """
+        # Arrows should be allowed, even with whitespace around.
+        # But the need to be escaped then.
+        # This requires a more complex regex.
+        # We can then loosen the requirement for the number of whitespace
+        # around the special arrow.
+
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            d file1
+            r file → 2 → file2renamed
+            r file3 → file→3renamed
+            r file4 → file4renamed
+            """)
+        testdir = create_dir("testdir", {
+            "file1":    "file 1 content",
+            "file → 2": "file 2 content",
+            "file3":    "file 3 content",
+            "file4":    "file 4 content",
+            })
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactly(
+            testdir,
+            {
+              'file → 2': "file 2 content",
+              'file3':    "file 3 content",
+              'file4renamed':    "file 4 content",
+            })
+
+
+# -- Helper methods -- #
 
 def create_dir(dirname, files):
     """
