@@ -2,9 +2,34 @@ import unittest
 import pathlib
 import tempfile
 import shutil
+import io
+import sys
 import os
 
 edir = __import__("edir")
+
+class SysOutWrapper():
+    sout = None
+    serr = None
+
+    sout_orig = None
+    serr_orig = None
+
+    def __init__(self):
+        self.sout = io.StringIO()
+        self.serr = io.StringIO()
+
+    def start_capturing(self):
+        # FIXME: Avoid starting capturing twice without stopping first.
+        self.sout_orig = sys.stdout
+        self.serr_orig = sys.stderr
+        sys.stdout = self.sout
+        sys.stderr = self.serr
+
+    def stop_capturing(self):
+        sys.stdout = self.sout_orig
+        sys.stderr = self.serr_orig
+
 
 class CustomAssertions():
     """Custom assertions relevant for the edir integration tests."""
@@ -95,6 +120,16 @@ class CustomAssertions():
                 ''')
 
 
+    def assertStdoutEquals(self, out_capture, expected):
+        testcase = unittest.TestCase()
+        testcase.assertEqual(out_capture.sout.getvalue().strip(), expected.strip())
+
+
+    def assertStderrEquals(self, err_capture, expected):
+        testcase = unittest.TestCase()
+        testcase.assertEqual(err_capture.serr.getvalue().strip(), expected.strip())
+
+
 class TestReadActionsFile(unittest.TestCase, CustomAssertions):
     """Test cases for actions involving reading an actions file."""
 
@@ -119,10 +154,15 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
     def test_actions_file_missing(self):
         """Test that the application exits with exit code 3 if the given actions file does not exit."""
+        soutCapture = SysOutWrapper()
+        soutCapture.start_capturing()
         with self.assertRaises(SystemExit) as cm:
             edir.main(['-i', 'does_not_exist'])
+        soutCapture.stop_capturing()
 
         self.assertEqual(cm.exception.code, 3)
+        self.assertStdoutEquals(soutCapture, '')
+        self.assertStderrEquals(soutCapture, "ERROR: does_not_exist does not exist.")
 
 
     def test_all_operations(self):
@@ -378,13 +418,11 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
     def test_arrow_in_filenames(self):
         """
         Test that the special arrow is not allowed as a character in filenames.
-        """
-        # Arrows should be allowed, even with whitespace around.
-        # But the need to be escaped then.
-        # This requires a more complex regex.
-        # We can then loosen the requirement for the number of whitespace
-        # around the special arrow.
 
+        FIXME: This currently show an error due to an "unparsable line".
+               But we should state more clearly that the arrow is the
+               problem. And we need to write a new actions file!
+        """
         # - preparation
 
         actions_file = create_file('actions_file', """
@@ -418,6 +456,90 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
               'file3':    "file 3 content",
               'file4renamed':    "file 4 content",
             })
+
+
+    def test_some_files_fail_again(self):
+        """
+        Test that a new actions file is written for operations that fail again.
+        """
+        self.fail('no yet impl')
+
+
+class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
+    """Tests for writing an actions file for failed operations."""
+
+    cwd    = '.'
+    tmpdir = None
+
+    def setUp(self):
+        """Create a temporary working dir and chdir to it."""
+        self.cwd = os.getcwd()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        os.chdir(self.tmpdir.name)
+
+
+    def tearDown(self):
+        """Delete the temporary working dir and chdir to the previous working dir."""
+        os.chdir(self.cwd)
+        self.tmpdir.cleanup()
+
+        # FIXME: This is unclean. Path should not be used static inside edir
+        edir.Path.paths = []
+
+
+
+    def test_no_actions_file_on_success(self):
+        """
+        Test that no actions file is written if everything works fine.
+        """
+        self.fail('no yet impl')
+
+
+    def test_all_files_fail(self):
+        """
+        Test all files as failed with all possible operations.
+
+        FIXME: Can we just retain the order the operations were executed in?
+               Should be possible.
+        """
+        self.fail('no yet impl')
+
+
+    def test_multiple_operations_fail_on_same_file(self):
+        """
+        Test the actions file is correctly written for multiple failed operations.
+
+        ATTENTION! The order or operation matters here!
+                   1. copy
+                   2. delete
+                   3. rename
+                   Can the last two be exchanged?
+        """
+        self.fail('no yet impl')
+
+
+    def test_only_some_operations_fail_on_same_file(self):
+        """
+        Test the actions file is correctly written, if some operations work and some don't.
+
+        For example a file can be renamed, but not copied.
+        """
+        self.fail('no yet impl')
+
+
+    def test_failed_file_with_whitespaces(self):
+        """
+        Test the actions file is correctly written for a file with whitespace in between and around.
+        """
+        self.fail('no yet impl')
+
+
+    def test_failed_file_with_arrows(self):
+        """
+        Test that failed files with arrows are written to the script (even though they cannot be renamed via the actions file).
+        """
+        self.fail('no yet impl')
+
 
 
 # -- Helper methods -- #
