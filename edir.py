@@ -210,6 +210,14 @@ class Path:
         cls.paths.append(cls(path))
 
     @classmethod
+    def get(cls, name):
+        'Get the file/dir with the given name'
+        for p in cls.paths:
+            if p.path.name == name:
+                return p
+        return None
+
+    @classmethod
     def add(cls, name, expand):
         'Add file[s]/dir[s] to the list of paths'
         path = pathlib.Path(name)
@@ -288,8 +296,10 @@ class Path:
             # habe? Beispielsweise Kopie + Rename? Oder mehrere Kopien?
             # Klappt das dann noch oder muss ich aufpassen, dass ich mir
             # den bereits vorhandenen Pfad nicht überschreibe?
-            Path.add(file_from, False)
-            path = Path.paths[-1]
+            path = Path.get(file_from)
+            if path is None:
+                Path.add(file_from, False)
+                path = Path.paths[-1]
             if action == 'r':
                 path.newpath = file_to
             elif action == 'c':
@@ -441,7 +451,7 @@ def run_noninteractively(actions_file):
     'Execute an actions file noninteractive use'
     fpath = pathlib.Path(actions_file)
     if not fpath.exists():
-        log("error", f'ERROR: {fpath} does not exist.')
+        log("error", f'ERROR: {fpath} does not exist.', error=True)
         sys.exit(3)
 
     try:

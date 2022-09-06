@@ -19,16 +19,26 @@ class SysOutWrapper():
         self.sout = io.StringIO()
         self.serr = io.StringIO()
 
-    def start_capturing(self):
-        # FIXME: Avoid starting capturing twice without stopping first.
+    def __enter__(self):
         self.sout_orig = sys.stdout
         self.serr_orig = sys.stderr
         sys.stdout = self.sout
         sys.stderr = self.serr
+        return self
 
-    def stop_capturing(self):
+    def __exit__(self, exc_type, exc_value, traceback):
         sys.stdout = self.sout_orig
         sys.stderr = self.serr_orig
+
+    def stdout(self):
+        return self.sout.getvalue()
+
+    def stderr(self):
+        return self.serr.getvalue()
+
+    def dispose(self):
+        self.sout.close()
+        self.serr.close()
 
 
 class CustomAssertions():
@@ -122,12 +132,23 @@ class CustomAssertions():
 
     def assertStdoutEquals(self, out_capture, expected):
         testcase = unittest.TestCase()
-        testcase.assertEqual(out_capture.sout.getvalue().strip(), expected.strip())
+        testcase.assertEqual(out_capture.stdout().strip(), expected.strip())
 
 
     def assertStderrEquals(self, err_capture, expected):
         testcase = unittest.TestCase()
-        testcase.assertEqual(err_capture.serr.getvalue().strip(), expected.strip())
+        testcase.assertEqual(err_capture.stderr().strip(), expected.strip())
+
+
+    def assertStdErrMentionsActionFile(self, err_capture):
+        # FIXME: Wie muss die Zeile tatsächlich aussehen?
+        match = re.search("ACTIONS FILE: (.+)$", err_capture.stderr().strip(), re.MULTILINE)
+        if match is None:
+            raise AssertionError(f"""
+            No line with actions_file found in stderr:
+            {err_capture.stderr()}
+            """)
+        return match[1]
 
 
 class TestReadActionsFile(unittest.TestCase, CustomAssertions):
@@ -154,15 +175,13 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
     def test_actions_file_missing(self):
         """Test that the application exits with exit code 3 if the given actions file does not exit."""
-        soutCapture = SysOutWrapper()
-        soutCapture.start_capturing()
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(SystemExit) as cm, \
+             SysOutWrapper() as out:
             edir.main(['-i', 'does_not_exist'])
-        soutCapture.stop_capturing()
 
         self.assertEqual(cm.exception.code, 3)
-        self.assertStdoutEquals(soutCapture, '')
-        self.assertStderrEquals(soutCapture, "ERROR: does_not_exist does not exist.")
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, "ERROR: does_not_exist does not exist.")
 
 
     def test_all_operations(self):
@@ -492,7 +511,43 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         """
         Test that no actions file is written if everything works fine.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file1', None),
+            path('file2', 'file2renamed'),
+            path('file3', 'file3', ['file3copy']),
+            ]
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file3copy':    "file 3 content",
+              'file4':        "file 4 content",
+            })
+
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, '')
 
 
     def test_all_files_fail(self):
@@ -502,7 +557,49 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         FIXME: Can we just retain the order the operations were executed in?
                Should be possible.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file1', None),
+            path('file2', 'file2renamed'),
+            path('file3', 'file3', ['file3copy']),
+            ]
+
+        # - test
+
+        try:
+            os.chmod("testdir", 0o555)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir", 0o775)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1': "file 1 content",
+              'file2': "file 2 content",
+              'file3': "file 3 content",
+              'file4': "file 4 content",
+            })
+
+        #self.assertEqual(cm.exception.code, 3)
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, 'FIXME: Hier die richtige Fehlermeldung parsen')
+        actions_file = assertStdErrMentionsActionFile(out)
+        #TODO: Den Inhalt des geschriebenen action_files vergleichen
+        self.fail('FERTSCH')
 
 
     def test_multiple_operations_fail_on_same_file(self):
@@ -571,6 +668,14 @@ def create_file(filename, content):
     with file.open('w') as fp:
         fp.writelines(content)
     return file.resolve()
+
+
+def path(name, newname, copies= []):
+    orig = pathlib.Path(name)
+    path = edir.Path(orig)
+    path.newpath = None if newname == None else pathlib.Path(newname)
+    path.copies = copies
+    return path
 
 
 if __name__ == '__main__':
