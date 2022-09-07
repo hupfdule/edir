@@ -39,6 +39,7 @@ COLORS = {
 }
 
 ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
+COMMENT_LINE_REGEX = r'^\s*#'
 
 args = None
 gitfiles = set()
@@ -551,7 +552,7 @@ def perform_actions(paths):
             if err:
                 log('copy', f'Copy "{p.diagrepr}" to "{c}{appdash}"{p.note} '
                         f'ERROR: {err}', error=True)
-                to_actions_file('c', p.path, p.newpath)
+                to_actions_file('c', p.path, c)
             else:
                 log('copy', f'Copied "{p.diagrepr}" to "{c}{appdash}"{p.note}')
 
@@ -574,10 +575,11 @@ def perform_actions(paths):
         f"Some or all files could not be processed. An actions-file was written for them to \n" +
         f"  {actions_file}\n" +
         f"You can try to reapply those actions with \n" +
-        f"  'edir -i {actions_file}'",
+        f"  edir -i {actions_file}",
         error=True)
 
     # Return status code 0 = all good, 1 = some bad, 2 = all bad.
+    #@print (f"ROFL: {counts}")
     return (1 if counts[0] > 0 else 2) if counts[1] > 0 else 0
 
 

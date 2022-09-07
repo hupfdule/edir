@@ -5,6 +5,7 @@ import shutil
 import io
 import sys
 import os
+import re
 
 edir = __import__("edir")
 
@@ -140,6 +141,16 @@ class CustomAssertions():
         testcase.assertEqual(err_capture.stderr().strip(), expected.strip())
 
 
+    def assertStdoutContains(self, out_capture, expected):
+        testcase = unittest.TestCase()
+        testcase.assertIn(expected, out_capture.stdout())
+
+
+    def assertStderrContains(self, err_capture, expected):
+        testcase = unittest.TestCase()
+        testcase.assertIn(expected, err_capture.stderr())
+
+
     def assertStdErrMentionsActionFile(self, err_capture):
         # FIXME: Wie muss die Zeile tatsächlich aussehen?
         match = re.search("ACTIONS FILE: (.+)$", err_capture.stderr().strip(), re.MULTILINE)
@@ -149,6 +160,18 @@ class CustomAssertions():
             {err_capture.stderr()}
             """)
         return match[1]
+
+
+    def assertActionsFileContainsEntries(self, actions_file, lines):
+        fpath = pathlib.Path(actions_file)
+        with fpath.open() as fp:
+            entries = []
+            for count, line in enumerate(fp, 1):
+                line = line.rstrip('\n')
+                if line.strip() and not re.match(edir.COMMENT_LINE_REGEX, line):
+                    entries.append(line)
+            self.assertListsEqual(entries, lines)
+
 
 
 class TestReadActionsFile(unittest.TestCase, CustomAssertions):
@@ -171,6 +194,9 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
 
         # FIXME: This is unclean. Path should not be used static inside edir
         edir.Path.paths = []
+        # FIXME: These are also bad.
+        edir.counts = [0, 0]
+        edir.actions_file = None
 
 
     def test_actions_file_missing(self):
@@ -504,6 +530,9 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
 
         # FIXME: This is unclean. Path should not be used static inside edir
         edir.Path.paths = []
+        # FIXME: These are also bad.
+        edir.counts = [0, 0]
+        edir.actions_file = None
 
 
 
@@ -568,7 +597,7 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         paths = [
             path('file1', None),
             path('file2', 'file2renamed'),
-            path('file3', 'file3', ['file3copy']),
+            path('file3', 'file3', ['file3copy', 'file3copy2']),
             ]
 
         # - test
@@ -578,7 +607,7 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
             cwd = os.getcwd()
             os.chdir("testdir")
             with SysOutWrapper() as out:
-                edir.perform_actions(paths)
+                exit_code = edir.perform_actions(paths)
         finally:
             os.chdir(cwd)
             os.chmod("testdir", 0o775)
@@ -594,12 +623,16 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
               'file4': "file 4 content",
             })
 
-        #self.assertEqual(cm.exception.code, 3)
-        self.assertStdoutEquals(out, '')
-        self.assertStderrEquals(out, 'FIXME: Hier die richtige Fehlermeldung parsen')
-        actions_file = assertStdErrMentionsActionFile(out)
-        #TODO: Den Inhalt des geschriebenen action_files vergleichen
-        self.fail('FERTSCH')
+        self.assertEqual(exit_code, 2)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'd file1',
+            'r file2 → file2renamed',
+            'c file3 → file3copy',
+            'c file3 → file3copy2',
+            ])
 
 
     def test_multiple_operations_fail_on_same_file(self):
