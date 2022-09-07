@@ -15,6 +15,8 @@ import tempfile
 import itertools
 import shlex
 import pathlib
+import datetime
+import textwrap
 from collections import OrderedDict
 from shutil import rmtree, copy2, copytree
 
@@ -42,6 +44,7 @@ args = None
 gitfiles = set()
 counts = [0, 0]
 consoles = [None, None]
+actions_file = None
 
 def log(func, msg, *, error=False):
     'Output given message with appropriate color'
@@ -157,8 +160,7 @@ class Path:
         try:
             tempdir.mkdir(parents=True, exist_ok=True)
         except Exception:
-            print(f'Create dir for {self.diagrepr} ERROR: '
-                    f'Can not write in {tempdir.parent}', file=sys.stderr)
+            return f'Create dir for {self.diagrepr} ERROR: Can not write in {tempdir.parent}'
         else:
             self.temppath = self.inc_path(tempdir / self.newpath.name)
             self.tempdirs.add(tempdir)
@@ -516,11 +518,16 @@ def perform_actions(paths):
 
         if p.newpath:
             if p.newpath != p.path:
-                p.rename_temp()
+                err = p.rename_temp()
+                if err:
+                    # FIXME: Das ist nicht zwingend rename! Kann auch copy sein.
+                    log('rename', f'Rename "{p.diagrepr}" ERROR: {err}', error=True)
+                    to_actions_file('r', p.path, p.newpath)
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
                 log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                to_actions_file('d', p.path, None)
             else:
                 log('remove', f'Removed "{p.diagrepr}"')
 
@@ -544,6 +551,7 @@ def perform_actions(paths):
             if err:
                 log('copy', f'Copy "{p.diagrepr}" to "{c}{appdash}"{p.note} '
                         f'ERROR: {err}', error=True)
+                to_actions_file('c', p.path, p.newpath)
             else:
                 log('copy', f'Copied "{p.diagrepr}" to "{c}{appdash}"{p.note}')
 
@@ -556,11 +564,88 @@ def perform_actions(paths):
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
                 log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                to_actions_file('d', p.path, None)
             else:
                 log('remove', f'Removed "{p.diagrepr}"{p.note}')
 
+    # TODO: Make sure that this is prominently readable
+    if actions_file is not None:
+        log('error',
+        f"Some or all files could not be processed. An actions-file was written for them to \n" +
+        f"  {actions_file}\n" +
+        f"You can try to reapply those actions with \n" +
+        f"  'edir -i {actions_file}'",
+        error=True)
+
     # Return status code 0 = all good, 1 = some bad, 2 = all bad.
     return (1 if counts[0] > 0 else 2) if counts[1] > 0 else 0
+
+
+def to_actions_file(action, source_path, target_path):
+    if not actions_file:
+        create_actions_file()
+
+    with open(actions_file, 'a') as f:
+        if target_path is None:
+            f.write(f"{action} {source_path}\n")
+        else:
+            f.write(f"{action} {source_path} → {target_path}\n")
+
+
+
+def create_actions_file():
+    # First try to create the actions file in the current directory
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+    try:
+        fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", dir=".", text=True)
+    except Exception as err:
+        try:
+            fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", text=True)
+        except Exception as err:
+            # FIXME: As a last resort we could print the actions file to stdout or stderr
+            log('error', 'ERROR: Cannot write actions file. Unfortunately, your changes are lost', error=True)
+            #sys.exit(3)
+            raise err
+
+    # now print the header into the file
+    with open(fp, 'w') as f:
+        f.writelines(textwrap.dedent(f"""\
+        # workdir: {os.getcwd()}
+        #
+        # Be careful when editing this file. The order of entries matters. Also the
+        # number of whitespace characters is significant.
+        #
+        # Format of this file:
+        #  operation  source file name  [single space  arrow  single space  new file name]
+        #  │          │                  │             │      │             │
+        #  │ ┌────────┘   ┌──────────────┘             │      │             │
+        #  │ │            │┌───────────────────────────┘      │             │
+        #  │ │            ││┌─────────────────────────────────┘             │
+        #  │ │            │││┌──────────────────────────────────────────────┘
+        #  │ │            ││││
+        #  ▼ ▼            ▼▼▼▼
+        #  d ./source file → ./target file
+        #
+        #  The possible operations are:
+        #  d: Delete (only the source file name is allowed as additional content then
+        #  r: Rename
+        #  c: Copy
+        #
+        #  The arrow symbol must be surrounded by exactly 1 space character on each
+        #  side. All other whitespace characters are recognized as parts of the
+        #  file name then.
+        #
+        #  As the arrow has a special meaning here, it is not possible to use it in
+        #  the actual file names. Escaping is not supported.
+        #
+        #  This file format is still subject to change.
+        #
+        #  Empty lines and lines starting with a hash mark (#) are ignored
+
+        """))
+    global actions_file
+    actions_file = pathlib.Path(path)
+
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))

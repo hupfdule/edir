@@ -23,6 +23,9 @@ check:
 	vermin --no-tips -i $(PYNAME).py setup.py
 	python3 setup.py check
 
+test:
+	python3 -m unittest discover -s tests/integration/
+
 doc:
 	update-readme-usage
 

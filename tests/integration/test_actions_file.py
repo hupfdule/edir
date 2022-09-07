@@ -638,6 +638,36 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         self.fail('no yet impl')
 
 
+class TestBasicActions(unittest.TestCase, CustomAssertions):
+    """Tests for the supported use cases."""
+
+    def test_circular_renames(self):
+        """
+        Test that circular renames give the expected result.
+
+        file1 is renamed to file2 and at the same time file2 is renamed to file1.
+        """
+        self.fail('no yet impl')
+
+
+    def test_rename_to_new_subdirectories(self):
+        """
+        Test that intermediate subdirectories are created if necessary.
+        """
+        # TODO: Test multiple levels of subdirectories
+        self.fail('no yet impl')
+
+
+    def test_duplicate_target_name(self):
+        """
+        Test that no data loss occurs for duplicate target names.
+
+        This checks two cases:
+        1. Two renames with the same target name
+        2. One rename to an already existing name (e.g. in a subdirectory)
+        """
+        self.fail('no yet impl')
+
 
 # -- Helper methods -- #
 
