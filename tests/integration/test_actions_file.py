@@ -66,6 +66,7 @@ class CustomAssertions():
         Parameters:
             path  (pathlib.Path): the directory to check
             files (dict):         a dictionary mapping the expected file names to their content.
+                                  if the content is None, it will be ignored and not verified
 
         Usage:
             path = pathlib.Path("the_directory")
@@ -82,7 +83,8 @@ class CustomAssertions():
         self.assertListsEqual(actual_files, expected_files)
         for filename, content in files.items():
             file = path / filename
-            self.assertFileContains(file, content)
+            if content:
+                self.assertFileContains(file, content)
 
     def assertFileContains(self, file, content):
         """
@@ -645,7 +647,51 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
                    3. rename
                    Can the last two be exchanged?
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file2', 'file2renamed', ['file2copy', 'file2copy2']),
+            ]
+
+        # - test
+
+        try:
+            os.chmod("testdir", 0o555)
+            #os.chmod("testdir/file2", 0o000)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir", 0o775)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1':        "file 1 content",
+              'file2':        "file 2 content",
+              'file3':        "file 3 content",
+              'file4':        "file 4 content",
+            })
+
+        self.assertEqual(exit_code, 2)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'c file2 → file2copy',
+            'c file2 → file2copy2',
+            'r file2 → file2renamed',
+            ])
 
 
     def test_only_some_operations_fail_on_same_file(self):
@@ -654,21 +700,150 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
 
         For example a file can be renamed, but not copied.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file2', 'file2renamed', ['file2copy', 'file2copy2']),
+            ]
+
+        # - test
+
+        try:
+            os.chmod("testdir/file2", 0o000)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir/file2renamed", 0o664)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1':        "file 1 content",
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file4':        "file 4 content",
+              pathlib.Path(edir.actions_file).name: None,
+            })
+
+        self.assertEqual(exit_code, 1)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'c file2 → file2copy',
+            'c file2 → file2copy2',
+            ])
 
 
     def test_failed_file_with_whitespaces(self):
         """
         Test the actions file is correctly written for a file with whitespace in between and around.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            " file 2  ": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path(' file 2  ', '  file 2 renamed '),
+            ]
+
+        # - test
+
+        try:
+            os.chmod("testdir", 0o555)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir", 0o775)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1': "file 1 content",
+              ' file 2  ': "file 2 content",
+              'file3': "file 3 content",
+              'file4': "file 4 content",
+            })
+
+        self.assertEqual(exit_code, 2)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'r  file 2   →   file 2 renamed ',
+            ])
 
 
     def test_failed_file_with_arrows(self):
         """
         Test that failed files with arrows are written to the script (even though they cannot be renamed via the actions file).
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file→2": "file 2 content",
+            "file→3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file→2', 'file→2renamed'),
+            path('file→3', 'file3renamed'),
+            path('file4', 'file→4renamed'),
+            ]
+
+        # - test
+
+        try:
+            os.chmod("testdir", 0o555)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir", 0o775)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1': "file 1 content",
+              'file→2': "file 2 content",
+              'file→3': "file 3 content",
+              'file4': "file 4 content",
+            })
+
+        self.assertEqual(exit_code, 2)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'r file→2 → file→2renamed',
+            'r file→3 → file3renamed',
+            'r file4 → file→4renamed',
+            ])
 
 
 class TestBasicActions(unittest.TestCase, CustomAssertions):
