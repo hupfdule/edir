@@ -509,7 +509,50 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         """
         Test that a new actions file is written for operations that fail again.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        actions_file = create_file('actions_file', """
+            d file1
+            r file2 → file2renamed
+            c file3 → file3copy
+            """)
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+
+        # - test
+
+        try:
+            os.chmod("testdir/file3", 0o000)
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            with SysOutWrapper() as out:
+                exit_code = edir.main(['--quiet', '-i', str(actions_file)])
+        finally:
+            os.chdir(cwd)
+            os.chmod("testdir/file3", 0o664)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file2renamed': "file 2 content",
+              'file3':        "file 3 content",
+              'file4':        "file 4 content",
+              pathlib.Path(edir.actions_file).name: None,
+            })
+
+        self.assertEqual(exit_code, 1)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'c file3 → file3copy',
+            ])
 
 
 class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
