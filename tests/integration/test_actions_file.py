@@ -9,6 +9,11 @@ import re
 
 edir = __import__("edir")
 
+
+class ArgsMock():
+    pass
+
+
 class SysOutWrapper():
     sout = None
     serr = None
@@ -499,9 +504,9 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         self.assertDirContainsExactlyFiles(
             testdir,
             {
-              'file → 2': "file 2 content",
-              'file3':    "file 3 content",
-              'file4renamed':    "file 4 content",
+              'file → 2':     "file 2 content",
+              'file3':        "file 3 content",
+              'file4renamed': "file 4 content",
             })
 
 
@@ -892,13 +897,75 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
 class TestBasicActions(unittest.TestCase, CustomAssertions):
     """Tests for the supported use cases."""
 
+    cwd    = '.'
+    tmpdir = None
+
+    def setUp(self):
+        """Create a temporary working dir and chdir to it."""
+        self.cwd = os.getcwd()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        os.chdir(self.tmpdir.name)
+        edir.args = ArgsMock()
+
+    def tearDown(self):
+        """Delete the temporary working dir and chdir to the previous working dir."""
+        os.chdir(self.cwd)
+        self.tmpdir.cleanup()
+        edir.args = None
+
+        # FIXME: This is unclean. Path should not be used static inside edir
+        edir.Path.paths = []
+        # FIXME: These are also bad.
+        edir.counts = [0, 0]
+        edir.actions_file = None
+
+
     def test_circular_renames(self):
         """
         Test that circular renames give the expected result.
 
         file1 is renamed to file2 and at the same time file2 is renamed to file1.
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file1', 'file2'),
+            path('file2', 'file1'),
+            path('file3', 'file3', ['file4']),
+            path('file4', 'file3'),
+            ]
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.args.quiet = True
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file2':  "file 1 content",
+              'file1':  "file 2 content",
+              'file3':  "file 3 content",
+              'file4':  "file 3 content",
+              'file3~': "file 4 content",
+            })
+
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, '')
 
 
     def test_rename_to_new_subdirectories(self):
@@ -906,7 +973,42 @@ class TestBasicActions(unittest.TestCase, CustomAssertions):
         Test that intermediate subdirectories are created if necessary.
         """
         # TODO: Test multiple levels of subdirectories
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        paths = [
+            path('file3', 'some/sub/dir/file3renamed'),
+            ]
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.args.quiet = True
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'file1':                     "file 1 content",
+              'file2':                     "file 2 content",
+              'some/sub/dir/file3renamed': "file 3 content",
+              'file4':                     "file 4 content",
+            })
+
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, '')
 
 
     def test_duplicate_target_name(self):
@@ -917,7 +1019,46 @@ class TestBasicActions(unittest.TestCase, CustomAssertions):
         1. Two renames with the same target name
         2. One rename to an already existing name (e.g. in a subdirectory)
         """
-        self.fail('no yet impl')
+        # - preparation
+
+        testdir = create_dir("testdir", {
+            "file1": "file 1 content",
+            "file2": "file 2 content",
+            "file3": "file 3 content",
+            "file4": "file 4 content",
+            })
+        create_dir("testdir/some/sub/dir", {"file5": "file 5 content"})
+        paths = [
+            path('file1', 'duplicate'),
+            path('file2', 'duplicate'),
+            path('file3', 'some/sub/dir/file5'),
+            ]
+
+        # - test
+
+        try:
+            cwd = os.getcwd()
+            os.chdir("testdir")
+            edir.args.quiet = True
+            with SysOutWrapper() as out:
+                exit_code = edir.perform_actions(paths)
+        finally:
+            os.chdir(cwd)
+
+        # - verification
+
+        self.assertDirContainsExactlyFiles(
+            testdir,
+            {
+              'duplicate':           "file 1 content",
+              'duplicate~':          "file 2 content",
+              'some/sub/dir/file5~': "file 3 content",
+              'file4':               "file 4 content",
+              'some/sub/dir/file5':  "file 5 content",
+            })
+
+        self.assertStdoutEquals(out, '')
+        self.assertStderrEquals(out, '')
 
 
 # -- Helper methods -- #
@@ -930,7 +1071,7 @@ def create_dir(dirname, files):
         dirname (string):    the directory to create (in the current working directory)
         files   (dict):      a dictionary mapping the filenames to create to their content
     """
-    os.mkdir(dirname)
+    os.makedirs(dirname)
     for file, content in files.items():
         create_file(dirname + "/" + file, content)
 
