@@ -11,10 +11,12 @@ edir = __import__("edir")
 
 
 class ArgsMock():
+    """Dummy class to be used as an 'args' object of the application in unit tests."""
     pass
 
 
 class SysOutWrapper():
+    """Wrapper to capture stdout and stderr for comparision purposes."""
     sout = None
     serr = None
 
@@ -51,18 +53,28 @@ class CustomAssertions():
     """Custom assertions relevant for the edir integration tests."""
 
     def list_dirs_recursively(self, path, only_files=False):
+        """
+        List all files in the specified 'path', recursively.
+
+        Parameters:
+            path {pathlib.Path}: the directory to check
+            only_files {boolean): whether to only return regular files
+                                  (True) or only directories (False).
+                                  Default=False
+
+        Returns: A list with the all the files in 'path'. 
+        """
         result = []
         for root, dirs, files in os.walk(path):
-            #print(f"VORHER: {root}")
             root = root.removeprefix(path.name)
             root = root.removeprefix("/")
-            #print(f"NACHER: {root}")
             for name in files:
                 result.append(os.path.join(root, name))
             if not only_files:
                 for name in dirs:
                     result.append(os.path.join(root, name))
         return result
+
 
     def assertDirContainsExactlyFiles(self, path, files):
         """
@@ -90,6 +102,7 @@ class CustomAssertions():
             file = path / filename
             if content:
                 self.assertFileContains(file, content)
+
 
     def assertFileContains(self, file, content):
         """
@@ -156,17 +169,6 @@ class CustomAssertions():
     def assertStderrContains(self, err_capture, expected):
         testcase = unittest.TestCase()
         testcase.assertIn(expected, err_capture.stderr())
-
-
-    def assertStdErrMentionsActionFile(self, err_capture):
-        # FIXME: Wie muss die Zeile tatsächlich aussehen?
-        match = re.search("ACTIONS FILE: (.+)$", err_capture.stderr().strip(), re.MULTILINE)
-        if match is None:
-            raise AssertionError(f"""
-            No line with actions_file found in stderr:
-            {err_capture.stderr()}
-            """)
-        return match[1]
 
 
     def assertActionsFileContainsEntries(self, actions_file, lines):
