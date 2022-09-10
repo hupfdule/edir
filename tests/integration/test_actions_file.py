@@ -1,11 +1,11 @@
-import unittest
-import pathlib
-import tempfile
-import shutil
 import io
-import sys
 import os
+import pathlib
 import re
+import shutil
+import sys
+import tempfile
+import unittest
 
 edir = __import__("edir")
 
