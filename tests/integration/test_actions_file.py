@@ -495,7 +495,8 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         try:
             cwd = os.getcwd()
             os.chdir("testdir")
-            edir.main(['--quiet', '-i', str(actions_file)])
+            with SysOutWrapper() as out:
+                exit_code = edir.main(['--quiet', '-i', str(actions_file)])
         finally:
             os.chdir(cwd)
 
@@ -507,7 +508,18 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
               'file → 2':     "file 2 content",
               'file3':        "file 3 content",
               'file4renamed': "file 4 content",
+              pathlib.Path(edir.actions_file).name: None,
             })
+
+        self.assertEqual(exit_code, 1)
+        self.assertStdoutContains(out, '')
+        self.assertStderrContains(out, 'The arrow character (→) is not supported in file names when using an actions-file.')
+        self.assertStderrContains(out, 'An actions-file was written')
+        actions_file = edir.actions_file
+        self.assertActionsFileContainsEntries(actions_file, [
+            'r file → 2 → file2renamed',
+            'r file3 → file→3renamed',
+            ])
 
 
     def test_some_files_fail_again(self):

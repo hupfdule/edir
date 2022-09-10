@@ -289,6 +289,9 @@ class Path:
             match = re.search(ACTION_LINE_REGEX, line)
             if match is None:
                 log('parse', f'unparsable line: {line}', error=True)
+                if line.count('→') > 0:
+                    log('parse', f'The arrow character (→) is not supported in file names when using an actions-file.', error=True)
+                to_actions_file_line(line)
                 continue
 
             action    = match[1]
@@ -584,15 +587,18 @@ def perform_actions(paths):
 
 
 def to_actions_file(action, source_path, target_path):
+    if target_path is None:
+        to_actions_file_line(f"{action} {source_path}")
+    else:
+        to_actions_file_line(f"{action} {source_path} → {target_path}")
+
+
+def to_actions_file_line(line):
     if not actions_file:
         create_actions_file()
 
     with open(actions_file, 'a') as f:
-        if target_path is None:
-            f.write(f"{action} {source_path}\n")
-        else:
-            f.write(f"{action} {source_path} → {target_path}\n")
-
+        f.write(line + '\n')
 
 
 def create_actions_file():
