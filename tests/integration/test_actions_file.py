@@ -206,13 +206,15 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         # FIXME: These are also bad.
         edir.counts = [0, 0]
         edir.actions_file = None
+        edir.applied_actions = []
+        edir.color = edir.Colorization(False)
 
 
     def test_actions_file_missing(self):
         """Test that the application exits with exit code 3 if the given actions file does not exit."""
         with self.assertRaises(SystemExit) as cm, \
              SysOutWrapper() as out:
-            edir.main(['-i', 'does_not_exist'])
+            edir.main(['-i', 'does_not_exist', '--no-color'])
 
         self.assertEqual(cm.exception.code, 3)
         self.assertStdoutEquals(out, '')
@@ -688,6 +690,8 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         # FIXME: These are also bad.
         edir.counts = [0, 0]
         edir.actions_file = None
+        edir.applied_actions = []
+        edir.color = edir.Colorization(False)
 
 
 
@@ -1020,7 +1024,8 @@ class TestBasicActions(unittest.TestCase, CustomAssertions):
         # FIXME: These are also bad.
         edir.counts = [0, 0]
         edir.actions_file = None
-
+        edir.applied_actions = []
+        edir.color = edir.Colorization(False)
 
     def test_circular_renames(self):
         """

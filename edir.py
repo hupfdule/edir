@@ -30,32 +30,76 @@ SUFFIX = '.sh'
 # The temp dir we will use in the dir of each target move
 TEMPDIR = '.tmp-' + PROG
 
-COLORS = {
-    'remove': 'red',
-    'rename': 'yellow',
-    'copy': 'green',
-    'parse': 'cyan',
-    'error': 'bright_red bold',
-}
-
 ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
 COMMENT_LINE_REGEX = r'^\s*#'
 
 args = None
 gitfiles = set()
-counts = [0, 0]
-consoles = [None, None]
 actions_file = None
+applied_actions = []
+failed_actions = []
 
-def log(func, msg, *, error=False):
-    'Output given message with appropriate color'
-    counts[error] += 1
 
-    if error or not args.quiet:
-        if consoles[0]:
-            consoles[error].print(msg, style=COLORS[func], highlight=False)
+class Colorization:
+
+    def __init__(self, use_color):
+        if not use_color:
+            self.RST = ''
+            self.RED = ''
+            self.GRN = ''
+            self.YLW = ''
+            self.BLU = ''
+            self.MGT = ''
+            self.CYN = ''
+            self.WHT = ''
+            self.BLD = ''
+            self.FNT = ''
+            self.NRM = ''
+            self.action_colors = {
+                    'd': {"col": '', "name": 'Deleted'},
+                    'r': {"col": '', "name": 'Renamed'},
+                    'c': {"col": '', "name": 'Copied '},
+                    }
         else:
-            print(msg, file=(sys.stderr if error else sys.stdout))
+            self.RST = '\033[0m'
+            self.RED = '\033[31m'
+            self.GRN = '\033[32m'
+            self.YLW = '\033[33m'
+            self.BLU = '\033[34m'
+            self.MGT = '\033[35m'
+            self.CYN = '\033[36m'
+            self.WHT = '\033[37m'
+            self.BLD = '\033[1m'
+            self.FNT = '\033[2m'
+            self.NRM = '\033[22m'
+            self.action_colors = {
+                    'd': {"col": self.MGT, "name": 'Deleted'},
+                    'r': {"col": self.YLW, "name": 'Renamed'},
+                    'c': {"col": self.CYN, "name": 'Copied '},
+                    }
+
+    def bright(self, col):
+        'Return a color string with the bright version of the given color'
+        if col == '':
+            return '';
+        else:
+            number = re.sub('^\033\\[(\\d+)m', '\\1', col)
+            return '\033['+str(int(number)+60)+'m'
+
+    def err(self):
+        'Return a color string for error messages'
+        return self.bright(self.RED) + self.BLD
+
+color = Colorization(False)
+
+
+def sout(*args, **kwargs):
+    'Print a message to stdout'
+    print(*args, file=sys.stdout, **kwargs)
+
+def serr(*args, **kwargs):
+    'Print a message to stderr'
+    print(*args, file=sys.stderr, **kwargs)
 
 def run(cmd):
     'Run given command and return stdout, stderr'
@@ -110,7 +154,8 @@ def rename(pathsrc, pathdest, is_git=False):
     if is_git:
         out, err = run(f'git mv -f "{pathsrc}" "{pathdest}"')
         if err:
-            log('rename', f'Rename "{pathsrc}" git mv ERROR: {err}', error=True)
+            # FIXME: Better raise an exception here? The error should be handled alsewhere
+            serr(f'{color.err()}Rename "{pathsrc}" git mv ERROR: {err}{color.RST}')
     else:
         pathsrc.replace(pathdest)
 
@@ -288,9 +333,11 @@ class Path:
 
             match = re.search(ACTION_LINE_REGEX, line)
             if match is None:
-                log('parse', f'unparsable line: {line}', error=True)
+                # FIXME: A bisserl unsauber.
+                failed_actions.append((None, None, None))
+                serr(f'{color.err()}unparsable line: {line}{color.RST}')
                 if line.count('→') > 0:
-                    log('parse', f'The arrow character (→) is not supported in file names when using an actions-file.', error=True)
+                    serr(f'{color.err()}The arrow character (→) is not supported in file names when using an actions-file.{color.RST}')
                 to_actions_file_line(line)
                 continue
 
@@ -311,7 +358,7 @@ class Path:
             elif action == 'd':
                 pass
             else:
-                log('parse', f'unsupported action: {action}', error=True)
+                serr(f'{color.err()}unsupported action: {action}{color.RST}')
                 continue
 
 
@@ -414,14 +461,10 @@ def main(argv=[]):
 
     args = opt.parse_args(shlex.split(cnflines) + argv)
 
+    # FIXME: Check if terminal is color capable
     if not args.no_color:
-        try:
-            from rich.console import Console
-        except Exception:
-            args.no_color = True
-        else:
-            consoles[0] = Console()
-            consoles[1] = Console(stderr=True)
+        global color
+        color = Colorization(True)
 
     # Check if we are in a git repo
     if args.git != 0:
@@ -454,14 +497,15 @@ def run_noninteractively(actions_file):
     'Execute an actions file noninteractive use'
     fpath = pathlib.Path(actions_file)
     if not fpath.exists():
-        log("error", f'ERROR: {fpath} does not exist.', error=True)
+        serr(f'{color.err()}ERROR: {fpath} does not exist.{color.RST}')
+        # FIXME: Exit code 3 is not defined and never tested
         sys.exit(3)
 
     try:
         with fpath.open() as fp:
             Path.read_actionsfile(fp)
     except OSError as err:
-        log("error", 'Error reading actions file {fpath}: {err}')
+        serr(f'{color.err()}ERROR: Reading actions_file {fpath} failed: {err}{color.RST}')
         sys.exit(3)
 
 def run_interactively(filelist):
@@ -522,15 +566,18 @@ def perform_actions(paths):
             if p.newpath != p.path:
                 err = p.rename_temp()
                 if err:
-                    log('rename', f'Rename "{p.diagrepr}" ERROR: {err}', error=True)
+                    # FIXME: The logging can be maede elsewhere. Alls
+                    # necessary information should be contained in the
+                    # arguments to 'to_actions_file'
+                    serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
                     to_actions_file('r', p.path, p.newpath)
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
-                log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
                 to_actions_file('d', p.path, None)
             else:
-                log('remove', f'Removed "{p.diagrepr}"')
+                applied_actions.append(('d', p.diagrepr))
 
     # Pass 2: Delete all removed dirs, if empty or recursive delete.
     for p in paths:
@@ -538,23 +585,22 @@ def perform_actions(paths):
             if remove(p.path, p.is_git, args.trash, args.recurse) is None:
                 # Have removed, so flag as finished for final dirs pass below
                 p.is_dir = False
-                log('remove', f'Removed "{p.diagrepr}"{p.note}')
+                applied_actions.append(('d', f"{p.diagrepr}{p.note}"))
 
     # Pass 3. Rename all temp files and dirs to final target, and make
     # copies.
     for p in paths:
         appdash = '/' if p.is_dir else ''
         if p.restore_temp():
-            log('rename', f'Renamed "{p.diagrepr}" to "{p.newpath}{appdash}"')
+            applied_actions.append(('r', p.diagrepr, f"{p.newpath}{appdash}"))
 
         for c in p.copies:
             err = p.copy(c)
             if err:
-                log('copy', f'Copy "{p.diagrepr}" to "{c}{appdash}"{p.note} '
-                        f'ERROR: {err}', error=True)
+                serr(f'{color.err()}Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}{color.RST}')
                 to_actions_file('c', p.path, c)
             else:
-                log('copy', f'Copied "{p.diagrepr}" to "{c}{appdash}"{p.note}')
+                applied_actions.append(('c', p.diagrepr, f"{c}{appdash}{p.note}"))
 
     # Remove all the temporary dirs we created
     Path.remove_temps()
@@ -564,23 +610,54 @@ def perform_actions(paths):
         if p.is_dir and not p.newpath:
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
-                log('remove', f'Remove "{p.diagrepr}" ERROR: {err}', error=True)
+                serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
                 to_actions_file('d', p.path, None)
             else:
-                log('remove', f'Removed "{p.diagrepr}"{p.note}')
+                applied_actions.append(('d', f"{p.diagrepr}{p.note}"))
+
+    # Now print the applied operations
+    print_executed_actions()
 
     # Show a prominent error message indicating that some actions failed
     # and how to reexecute these.
     if actions_file is not None:
-        log('error',
-        f"\nSome or all files could not be processed. An actions-file was written for them to \n" +
-        f"  {actions_file}\n" +
-        f"You can try to reapply those actions with \n" +
-        f"  edir -i {actions_file}",
-        error=True)
+        serr(f'{color.err()}'
+             f"\nSome or all files could not be processed. An actions-file was written for them to \n"
+             f"  {actions_file}\n"
+             f"You can try to reapply those actions with \n"
+             f"  edir -i {actions_file}"
+             f'{color.RST}')
+
 
     # Return status code 0 = all good, 1 = some bad, 2 = all bad.
-    return (1 if counts[0] > 0 else 2) if counts[1] > 0 else 0
+    return (1 if len(applied_actions) > 0 else 2) if len(failed_actions) > 0 else 0
+
+
+def print_executed_actions():
+    # This is an ugly hack. The number of successful chanegs should be
+    # checked elsewhere
+    if args.quiet:
+        return
+    col2 = [a[1] for a in applied_actions]
+    col2len = 0 if col2 == [] else len(max(col2, key=len))
+    for action in applied_actions:
+        act = color.action_colors[action[0]]["name"]
+        col = color.action_colors[action[0]]["col"]
+        source = f'"{action[1]}"'
+        source = f'{source: <{col2len+2}}'
+        target = None
+        if action[0] != 'd':
+            target = action[2]
+        if target is None:
+            sout(f'{col}{act}  {color.bright(col)}{color.BLD}{source}{color.NRM}{color.RST}')
+        else:
+            sout(f'{col}{act}  {color.bright(col)}{color.BLD}{source}{color.NRM}  →  "{color.BLD}{target}{color.NRM}{color.RST}"')
+
+
+def to_failed_actions(action, source_path, target_path, msg):
+    """"""
+    failed_actions.append((action, source_path, target_path))
+    serr(msg)
 
 
 def to_actions_file(action, source_path, target_path):
@@ -594,6 +671,7 @@ def to_actions_file(action, source_path, target_path):
         source_path (str): the file to apply the action to
         target_path (str): the result of the action (if action is != d)
     """
+    failed_actions.append((action, source_path, target_path))
     if target_path is None:
         to_actions_file_line(f"{action} {source_path}")
     else:
@@ -639,7 +717,7 @@ def create_actions_file():
         try:
             fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", text=True)
         except Exception as err:
-            log('error', 'ERROR: Cannot write actions file. Unfortunately, your changes are lost', error=True)
+            serr(f'{color.err()}ERROR: Cannot write actions file. Unfortunately, your changes are lost{color.RST}')
             raise err
 
     # now print the header into the file
