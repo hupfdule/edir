@@ -598,16 +598,11 @@ def perform_actions(paths):
             if p.newpath != p.path:
                 err = p.rename_temp()
                 if err:
-                    # FIXME: The logging can be made elsewhere. Alls
-                    # necessary information should be contained in the
-                    # arguments to 'to_actions_file'
-                    serr(f'Delete "{p.diagrepr}" ERROR: {err}')
-                    to_actions_file('r', p.path, p.newpath)
+                    to_actions_file('r', p.path, p.newpath, f'Delete "{p.diagrepr}" ERROR: {err}')
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
-                serr(f'Delete "{p.diagrepr}" ERROR: {err}')
-                to_actions_file('d', p.path, None)
+                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', p.diagrepr))
 
@@ -629,8 +624,7 @@ def perform_actions(paths):
         for c in p.copies:
             err = p.copy(c)
             if err:
-                serr(f'Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}')
-                to_actions_file('c', p.path, c)
+                to_actions_file('c', p.path, c, f'Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}')
             else:
                 applied_actions.append(('c', p.diagrepr, f"{c}{appdash}{p.note}"))
 
@@ -642,8 +636,7 @@ def perform_actions(paths):
         if p.is_dir and not p.newpath:
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
-                serr(f'Delete "{p.diagrepr}" ERROR: {err}')
-                to_actions_file('d', p.path, None)
+                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', f"{p.diagrepr}{p.note}"))
 
@@ -690,7 +683,7 @@ def to_failed_actions(action, source_path, target_path, msg):
     serr(msg)
 
 
-def to_actions_file(action, source_path, target_path):
+def to_actions_file(action, source_path, target_path, errmsg):
     """
     Write an action to the actions file.
 
@@ -702,6 +695,7 @@ def to_actions_file(action, source_path, target_path):
         target_path (str): the result of the action (if action is != d)
     """
     failed_actions.append((action, source_path, target_path))
+    serr(errmsg)
     if target_path is None:
         to_actions_file_line(f"{action} {source_path}")
     else:
