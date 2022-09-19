@@ -406,6 +406,25 @@ def editfile(filename):
     if res.returncode != 0:
         sys.exit(f'ERROR: {editor} returned {res.returncode}')
 
+
+def has_color_support():
+    """Check whether the terminal supports colors"""
+    try:
+        import curses
+        try:
+            stdscr = curses.initscr()
+            curses.start_color()
+            return curses.has_colors()
+        except:
+            return False
+        finally:
+            curses.endwin()
+    except ImportError:
+        # If we can't load curses, we cannot check for color support.
+        # Therefore we assuce we have color support.
+        return True
+
+
 def main(argv=[]):
     'Main code'
     global args
@@ -490,10 +509,10 @@ def main(argv=[]):
 
     args = opt.parse_args(shlex.split(cnflines) + argv)
 
-    # FIXME: Check if terminal is color capable
     if not args.no_color:
-        global color
-        color = Colorization(True)
+        if has_color_support():
+            global color
+            color = Colorization(True)
 
     # Check if we are in a git repo
     if args.git != 0:
