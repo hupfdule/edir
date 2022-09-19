@@ -163,7 +163,6 @@ def rename(pathsrc, pathdest, is_git=False):
     if is_git:
         out, err = run(f'git mv -f "{pathsrc}" "{pathdest}"')
         if err:
-            # FIXME: Better raise an exception here? The error should be handled alsewhere
             serr(f'Rename "{pathsrc}" git mv ERROR: {err}')
     else:
         pathsrc.replace(pathdest)
@@ -356,7 +355,6 @@ class Path:
                                          f'\nProceed anyway? {color.RST}')
                     if confirmation not in ['y', 'Y']:
                         sout('Aborting as requested…')
-                        # FIXME: Is exit code 0 correct? It was successful. But we didn't execute any actions.
                         sys.exit(0)
 
             # Skip blank or commented lines
@@ -600,7 +598,7 @@ def perform_actions(paths):
             if p.newpath != p.path:
                 err = p.rename_temp()
                 if err:
-                    # FIXME: The logging can be maede elsewhere. Alls
+                    # FIXME: The logging can be made elsewhere. Alls
                     # necessary information should be contained in the
                     # arguments to 'to_actions_file'
                     serr(f'Delete "{p.diagrepr}" ERROR: {err}')
