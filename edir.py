@@ -365,12 +365,9 @@ class Path:
 
             match = re.search(ACTION_LINE_REGEX, line)
             if match is None:
-                # FIXME: A bisserl unsauber.
-                failed_actions.append((None, None, None))
-                serr(f'unparsable line: {line}')
+                to_failed_actions(line, None, None, f'unparsable line: {line}')
                 if line.count('→') > 0:
                     serr(f'The arrow character (→) is not supported in file names when using an actions-file.')
-                to_actions_file_line(line)
                 continue
 
             action    = match[1]
@@ -598,11 +595,11 @@ def perform_actions(paths):
             if p.newpath != p.path:
                 err = p.rename_temp()
                 if err:
-                    to_actions_file('r', p.path, p.newpath, f'Delete "{p.diagrepr}" ERROR: {err}')
+                    to_failed_actions('r', p.path, p.newpath, f'Delete "{p.diagrepr}" ERROR: {err}')
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
-                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
+                to_failed_actions('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', p.diagrepr))
 
@@ -624,7 +621,7 @@ def perform_actions(paths):
         for c in p.copies:
             err = p.copy(c)
             if err:
-                to_actions_file('c', p.path, c, f'Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}')
+                to_failed_actions('c', p.path, c, f'Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}')
             else:
                 applied_actions.append(('c', p.diagrepr, f"{c}{appdash}{p.note}"))
 
@@ -636,7 +633,7 @@ def perform_actions(paths):
         if p.is_dir and not p.newpath:
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
-                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
+                to_failed_actions('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', f"{p.diagrepr}{p.note}"))
 
@@ -645,7 +642,8 @@ def perform_actions(paths):
 
     # Show a prominent error message indicating that some actions failed
     # and how to reexecute these.
-    if actions_file is not None:
+    if failed_actions:
+        write_actions_file()
         serr(f"\nSome or all files could not be processed. An actions-file was written for them to \n"
              f"  {color.BLD}{actions_file}{color.NRM}\n"
              f"You can try to reapply those actions with \n"
@@ -678,12 +676,19 @@ def print_executed_actions():
 
 
 def to_failed_actions(action, source_path, target_path, msg):
-    """"""
+    """Record a failed action and write an error message"""
     failed_actions.append((action, source_path, target_path))
     serr(msg)
 
 
-def to_actions_file(action, source_path, target_path, errmsg):
+def write_actions_file():
+    """Write the failed actions into an actions file"""
+    create_actions_file()
+    for failed_action in failed_actions:
+        to_actions_file(failed_action[0], failed_action[1], failed_action[2])
+
+
+def to_actions_file(action, source_path, target_path):
     """
     Write an action to the actions file.
 
@@ -694,9 +699,9 @@ def to_actions_file(action, source_path, target_path, errmsg):
         source_path (str): the file to apply the action to
         target_path (str): the result of the action (if action is != d)
     """
-    failed_actions.append((action, source_path, target_path))
-    serr(errmsg)
-    if target_path is None:
+    if source_path is None:
+        to_actions_file_line(f"{action}")
+    elif target_path is None:
         to_actions_file_line(f"{action} {source_path}")
     else:
         to_actions_file_line(f"{action} {source_path} → {target_path}")

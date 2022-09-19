@@ -207,6 +207,7 @@ class TestReadActionsFile(unittest.TestCase, CustomAssertions):
         edir.counts = [0, 0]
         edir.actions_file = None
         edir.applied_actions = []
+        edir.failed_actions = []
         edir.color = edir.Colorization(False)
 
 
@@ -691,6 +692,7 @@ class TestWriteActionsFile(unittest.TestCase, CustomAssertions):
         edir.counts = [0, 0]
         edir.actions_file = None
         edir.applied_actions = []
+        edir.failed_actions = []
         edir.color = edir.Colorization(False)
 
 
@@ -1025,6 +1027,7 @@ class TestBasicActions(unittest.TestCase, CustomAssertions):
         edir.counts = [0, 0]
         edir.actions_file = None
         edir.applied_actions = []
+        edir.failed_actions = []
         edir.color = edir.Colorization(False)
 
     def test_circular_renames(self):
