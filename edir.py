@@ -87,10 +87,6 @@ class Colorization:
             number = re.sub('^\033\\[(\\d+)m', '\\1', col)
             return '\033['+str(int(number)+60)+'m'
 
-    def err(self):
-        'Return a color string for error messages'
-        return self.bright(self.RED) + self.BLD
-
 color = Colorization(False)
 
 
@@ -98,9 +94,21 @@ def sout(*args, **kwargs):
     'Print a message to stdout'
     print(*args, file=sys.stdout, **kwargs)
 
-def serr(*args, **kwargs):
-    'Print a message to stderr'
-    print(*args, file=sys.stderr, **kwargs)
+def serr(*args, no_color=False, **kwargs):
+    '''
+    Print a message to stderr.
+
+    The message will be colored in bright red (except 'no_color' is True)
+
+    Parameters:
+        no_color (bool): Don't automatically color in red. Useful when
+                         customizing the colorization of the output.
+                         Default: False
+    '''
+    if no_color:
+        print(*args, file=sys.stderr, **kwargs)
+    else:
+        print(f'{color.bright(color.RED)}', *args, f'{color.RST}', file=sys.stderr, **kwargs)
 
 def run(cmd):
     'Run given command and return stdout, stderr'
@@ -155,8 +163,7 @@ def rename(pathsrc, pathdest, is_git=False):
     if is_git:
         out, err = run(f'git mv -f "{pathsrc}" "{pathdest}"')
         if err:
-            # FIXME: Better raise an exception here? The error should be handled alsewhere
-            serr(f'{color.err()}Rename "{pathsrc}" git mv ERROR: {err}{color.RST}')
+            serr(f'Rename "{pathsrc}" git mv ERROR: {err}')
     else:
         pathsrc.replace(pathdest)
 
@@ -331,24 +338,23 @@ class Path:
             match = re.search(WORKING_DIR_REGEX, line)
             if match:
                 if workdir_was_specified:
-                    serr(f'{color.bright(color.RED)}{color.BLD}workdir was specified multiple times in the actions file!\n'
+                    serr(f'{color.BLD}workdir was specified multiple times in the actions file!\n'
                          f'Cowardly refusing to proceed…\n'
                          f'  workdir 1: {prev_workdir}\n'
-                         f'  workdir 2: {match[1]}{color.RST}')
+                         f'  workdir 2: {match[1]}')
                     sys.exit(2)
                 workdir_was_specified = True
                 prev_workdir = match[1]
                 cur_workdir = os.getcwd()
                 if prev_workdir != cur_workdir:
                     confirmation = input(f'{color.bright(color.RED)}The current directory \n'
-                                         f'  "{cur_workdir}"\n'
+                                         f'  "{color.BLD}{cur_workdir}{color.NRM}"\n'
                                          f'is different than the workdir the actions file was generated in:\n'
-                                         f'  "{prev_workdir}"\n'
+                                         f'  "{color.BLD}{prev_workdir}{color.NRM}"\n'
                                          f'Executing the actions file in different directory may lead to unexpected results.\n'
                                          f'\nProceed anyway? {color.RST}')
                     if confirmation not in ['y', 'Y']:
                         sout('Aborting as requested…')
-                        # FIXME: Is exit code 0 correct? It was successful. But we didn't execute any actions.
                         sys.exit(0)
 
             # Skip blank or commented lines
@@ -361,9 +367,9 @@ class Path:
             if match is None:
                 # FIXME: A bisserl unsauber.
                 failed_actions.append((None, None, None))
-                serr(f'{color.err()}unparsable line: {line}{color.RST}')
+                serr(f'unparsable line: {line}')
                 if line.count('→') > 0:
-                    serr(f'{color.err()}The arrow character (→) is not supported in file names when using an actions-file.{color.RST}')
+                    serr(f'The arrow character (→) is not supported in file names when using an actions-file.')
                 to_actions_file_line(line)
                 continue
 
@@ -384,7 +390,7 @@ class Path:
             elif action == 'd':
                 pass
             else:
-                serr(f'{color.err()}unsupported action: {action}{color.RST}')
+                serr(f'unsupported action: {action}')
                 continue
 
 
@@ -523,7 +529,7 @@ def run_noninteractively(actions_file):
     'Execute an actions file noninteractive use'
     fpath = pathlib.Path(actions_file)
     if not fpath.exists():
-        serr(f'{color.err()}ERROR: {fpath} does not exist.{color.RST}')
+        serr(f'ERROR: {fpath} does not exist.')
         # FIXME: Exit code 3 is not defined and never tested
         sys.exit(3)
 
@@ -531,7 +537,7 @@ def run_noninteractively(actions_file):
         with fpath.open() as fp:
             Path.read_actionsfile(fp)
     except OSError as err:
-        serr(f'{color.err()}ERROR: Reading actions_file {fpath} failed: {err}{color.RST}')
+        serr(f'ERROR: Reading actions_file {fpath} failed: {err}')
         sys.exit(3)
 
 def run_interactively(filelist):
@@ -592,16 +598,11 @@ def perform_actions(paths):
             if p.newpath != p.path:
                 err = p.rename_temp()
                 if err:
-                    # FIXME: The logging can be maede elsewhere. Alls
-                    # necessary information should be contained in the
-                    # arguments to 'to_actions_file'
-                    serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
-                    to_actions_file('r', p.path, p.newpath)
+                    to_actions_file('r', p.path, p.newpath, f'Delete "{p.diagrepr}" ERROR: {err}')
         elif not p.is_dir:
             err = remove(p.path, p.is_git, args.trash)
             if err:
-                serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
-                to_actions_file('d', p.path, None)
+                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', p.diagrepr))
 
@@ -623,8 +624,7 @@ def perform_actions(paths):
         for c in p.copies:
             err = p.copy(c)
             if err:
-                serr(f'{color.err()}Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}{color.RST}')
-                to_actions_file('c', p.path, c)
+                to_actions_file('c', p.path, c, f'Copy   "{p.diagrepr}" to "{c}{appdash}"{p.note} ERROR: {err}')
             else:
                 applied_actions.append(('c', p.diagrepr, f"{c}{appdash}{p.note}"))
 
@@ -636,8 +636,7 @@ def perform_actions(paths):
         if p.is_dir and not p.newpath:
             err = remove(p.path, p.is_git, args.trash, args.recurse)
             if err:
-                serr(f'{color.err()}Delete "{p.diagrepr}" ERROR: {err}{color.RST}')
-                to_actions_file('d', p.path, None)
+                to_actions_file('d', p.path, None, f'Delete "{p.diagrepr}" ERROR: {err}')
             else:
                 applied_actions.append(('d', f"{p.diagrepr}{p.note}"))
 
@@ -647,12 +646,10 @@ def perform_actions(paths):
     # Show a prominent error message indicating that some actions failed
     # and how to reexecute these.
     if actions_file is not None:
-        serr(f'{color.err()}'
-             f"\nSome or all files could not be processed. An actions-file was written for them to \n"
-             f"  {actions_file}\n"
+        serr(f"\nSome or all files could not be processed. An actions-file was written for them to \n"
+             f"  {color.BLD}{actions_file}{color.NRM}\n"
              f"You can try to reapply those actions with \n"
-             f"  edir -i {actions_file}"
-             f'{color.RST}')
+             f"  {color.BLD}edir -i {actions_file}{color.NRM}")
 
 
     # Return status code 0 = all good, 1 = some bad, 2 = all bad.
@@ -686,7 +683,7 @@ def to_failed_actions(action, source_path, target_path, msg):
     serr(msg)
 
 
-def to_actions_file(action, source_path, target_path):
+def to_actions_file(action, source_path, target_path, errmsg):
     """
     Write an action to the actions file.
 
@@ -698,6 +695,7 @@ def to_actions_file(action, source_path, target_path):
         target_path (str): the result of the action (if action is != d)
     """
     failed_actions.append((action, source_path, target_path))
+    serr(errmsg)
     if target_path is None:
         to_actions_file_line(f"{action} {source_path}")
     else:
@@ -743,7 +741,7 @@ def create_actions_file():
         try:
             fp, path = tempfile.mkstemp(prefix=f"edir-actions-{timestamp}-", text=True)
         except Exception as err:
-            serr(f'{color.err()}ERROR: Cannot write actions file. Unfortunately, your changes are lost{color.RST}')
+            serr(f'ERROR: Cannot write actions file. Unfortunately, your changes are lost.')
             raise err
 
     # now print the header into the file
