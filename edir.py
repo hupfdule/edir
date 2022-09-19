@@ -32,6 +32,7 @@ TEMPDIR = '.tmp-' + PROG
 
 ACTION_LINE_REGEX = r'^([drc]) ([^→]+)(?: → ([^→]*))?$'
 COMMENT_LINE_REGEX = r'^\s*#'
+WORKING_DIR_REGEX = r'^\s*#\s*workdir:\s*(\S+)$'
 
 args = None
 gitfiles = set()
@@ -324,7 +325,32 @@ class Path:
     @classmethod
     def read_actionsfile(cls, fp):
         'Read the paths from an actions file'
+        workdir_was_specified = False
         for count, line in enumerate(fp, 1):
+            # check the working directory
+            match = re.search(WORKING_DIR_REGEX, line)
+            if match:
+                if workdir_was_specified:
+                    serr(f'{color.bright(color.RED)}{color.BLD}workdir was specified multiple times in the actions file!\n'
+                         f'Cowardly refusing to proceed…\n'
+                         f'  workdir 1: {prev_workdir}\n'
+                         f'  workdir 2: {match[1]}{color.RST}')
+                    sys.exit(2)
+                workdir_was_specified = True
+                prev_workdir = match[1]
+                cur_workdir = os.getcwd()
+                if prev_workdir != cur_workdir:
+                    confirmation = input(f'{color.bright(color.RED)}The current directory \n'
+                                         f'  "{cur_workdir}"\n'
+                                         f'is different than the workdir the actions file was generated in:\n'
+                                         f'  "{prev_workdir}"\n'
+                                         f'Executing the actions file in different directory may lead to unexpected results.\n'
+                                         f'\nProceed anyway? {color.RST}')
+                    if confirmation not in ['y', 'Y']:
+                        sout('Aborting as requested…')
+                        # FIXME: Is exit code 0 correct? It was successful. But we didn't execute any actions.
+                        sys.exit(0)
+
             # Skip blank or commented lines
             rawline = line.rstrip('\n\r')
             line = rawline.lstrip()
