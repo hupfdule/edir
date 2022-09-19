@@ -278,7 +278,8 @@ class Path:
         'Add file[s]/dir[s] to the list of paths'
         path = pathlib.Path(name)
         if not path.exists():
-            sys.exit(f'ERROR: {name} does not exist')
+            serr(f'ERROR: {name} does not exist')
+            sys.exit(3)
 
         if expand and path.is_dir():
             for child in sorted(path.iterdir()):
@@ -303,18 +304,33 @@ class Path:
             if not line or line[0] == '#':
                 continue
 
+            # TODO: Instead of just throwing errors, we should create an
+            #       actions file instead.
+            #       But what to write in? The invalid line does not
+            #       indicate the original line.
+            #       Or proceed with all other lines and write errors for
+            #       the failed ones?
+            #       Or write another backup file indicating the original
+            #       lines and the new lines and let the user decide what to
+            #       do?
+            #       By writing the original file and the modified one, the
+            #       user could edit the new one and reapply it with a
+            #       special operation (like edir <fromfile> <tofile>).
+            #       That could even replace our actions file.
             try:
                 n, pathstr = line.split(maxsplit=1)
             except Exception:
-                sys.exit(f'ERROR: line {count} invalid:\n{rawline}')
+                serr(f'ERROR: line {count} invalid:{color.RST}\n{rawline}')
+                sys.exit(3)
             try:
                 num = int(n)
             except Exception:
-                sys.exit(f'ERROR: line {count} number {n} invalid:\n{rawline}')
+                serr(f'ERROR: line {count} number {n} invalid:{color.RST}\n{rawline}')
+                sys.exit(3)
 
             if num <= 0 or num > len(cls.paths):
-                sys.exit(f'ERROR: line {count} number {num} '
-                        f'out of range:\n{rawline}')
+                serr(f'ERROR: line {count} number {num} out of range:{color.RST}\n{rawline}')
+                sys.exit(3)
 
             path = cls.paths[num - 1]
 
@@ -342,7 +358,7 @@ class Path:
                          f'Cowardly refusing to proceed…\n'
                          f'  workdir 1: {prev_workdir}\n'
                          f'  workdir 2: {match[1]}')
-                    sys.exit(2)
+                    sys.exit(3)
                 workdir_was_specified = True
                 prev_workdir = match[1]
                 cur_workdir = os.getcwd()
@@ -404,7 +420,8 @@ def editfile(filename):
 
     # Check if editor returned error
     if res.returncode != 0:
-        sys.exit(f'ERROR: {editor} returned {res.returncode}')
+        serr(f'ERROR: {editor} returned {res.returncode}')
+        sys.exit(3)
 
 
 def has_color_support():
@@ -546,7 +563,6 @@ def run_noninteractively(actions_file):
     fpath = pathlib.Path(actions_file)
     if not fpath.exists():
         serr(f'ERROR: {fpath} does not exist.')
-        # FIXME: Exit code 3 is not defined and never tested
         sys.exit(3)
 
     try:
