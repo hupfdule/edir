@@ -44,6 +44,9 @@ augroup END
 " Show the file info for the current entry
 call edir#update_file_info()
 
+nnoremap <buffer> <Plug>(vdir-toggle-fileinfo)  :call edir#toggle_fileinfo_visibility()<CR>
+nmap     \f  <Plug>(vdir-toggle-fileinfo)
+
 " Plugin folklore "{{{2
 let &cpo = s:cpo_save
 unlet s:cpo_save

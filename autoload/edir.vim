@@ -183,3 +183,14 @@ function! s:vim_update_file_info(lnum) abort
   let b:current_prop_id = prop_add(a:lnum, 0, {'type': 'file_info', 'text': file_info, 'text_align': 'right'})
 endfunction
 
+function! edir#toggle_fileinfo_visibility() abort
+  if g:edir_show_file_info ==# 0
+    let g:edir_show_file_info = 1
+  elseif g:edir_show_file_info ==# 1
+    let g:edir_show_file_info = 2
+  else
+    let g:edir_show_file_info = 0
+  endif
+  
+  call edir#update_file_info()
+endfunction
