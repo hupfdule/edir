@@ -5,6 +5,8 @@ let g:edir#pattern_line .= '(\d+)'           " then the counter
 let g:edir#pattern_line .= '\t'              " then a tab
 let g:edir#pattern_line .= '(.*)$'           " end with the file name
 
+silent! let s:log = log#getLogger(expand('<sfile>:t'))
+
 
 ""
 " Load the file info for every line in the buffer.
@@ -13,15 +15,23 @@ let g:edir#pattern_line .= '(.*)$'           " end with the file name
 " file name in the buffer. The result is stored in the buffer-local map
 " 'b:edir_file_info'
 function! edir#load_file_info() abort
+  silent! call s:log.trace("[edir#load_file_info] started")
   for lnum in range(1, line('$'))
     let l:match = matchlist(getline(lnum), g:edir#pattern_line)
     if l:match !=# []
+      silent! call s:log.trace("[edir#load_file_info] get_edir_file_info start ")
       let l:counter  = l:match[1]
       let l:filename = l:match[2]
-      let l:fileinfo = s:format_file_info(s:get_edir_file_info(l:filename))
-      let b:edir_file_info[l:counter] = l:fileinfo
+      " in vim (but not neovim) this blocks the UI until all fileinfos are
+      " gathered. This should be done sequentially like in vim-tree. Then
+      " it should be possible to use the UI while the info is still updated.
+      call timer_start(0, function('s:trigger_get_file_info', [l:counter, l:filename]))
+      silent! call s:log.trace("[edir#load_file_info] get_edir_file_info end ")
     endif
   endfor
+  silent! call s:log.trace("[edir#load_file_info] triggered")
+  call edir#update_file_info()
+  silent! call s:log.trace("[edir#load_file_info] finished rendering")
 endfunction
 
 
@@ -62,6 +72,16 @@ function! s:get_edir_file_info(file) abort
     let file_info['filename']          = get(fixed_width_info_split, 6, v:null)
   endif
   return filter(file_info, 'v:val != v:null')
+endfunction
+
+
+function! s:trigger_get_file_info(counter, filename, timer_id) abort
+  silent! call s:log.trace("[s:trigger_get_file_info] getting actual file info for '" . a:filename ."' with timer " . a:timer_id)
+  let l:fileinfo = s:format_file_info(s:get_edir_file_info(a:filename))
+  let b:edir_file_info[a:counter] = l:fileinfo
+  silent! call s:log.trace("[s:trigger_get_file_info] starting rendering with timer " . a:timer_id)
+  call edir#update_file_info()
+  silent! call s:log.trace("[s:trigger_get_file_info] finished rendering with timer " . a:timer_id)
 endfunction
 
 
