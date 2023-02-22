@@ -112,7 +112,7 @@ endfunction
 "   2: Show the file info for all the files in the buffer
 function! edir#update_file_info() abort
   if g:edir_show_file_info ==# 0
-    return
+    let l:lnums = []
   elseif g:edir_show_file_info ==# 1
     let l:lnums = [line('.')]
   else
@@ -153,7 +153,7 @@ function! s:nvim_update_file_info(lnum) abort
   if l:match == []
     let file_info = ''
   else
-    let file_info = b:edir_file_info[l:match[1]]
+    let file_info = get(b:edir_file_info, l:match[1], '')
   endif
   let ns_id = v:lua.vim.api.nvim_create_namespace('edir')
   let show_file_info = get(g:, 'edir_show_file_info', 0)
@@ -178,7 +178,7 @@ function! s:vim_update_file_info(lnum) abort
   if l:match == []
     let file_info = ''
   else
-    let file_info = b:edir_file_info[l:match[1]]
+    let file_info = get(b:edir_file_info, l:match[1], '')
   endif
   let b:current_prop_id = prop_add(a:lnum, 0, {'type': 'file_info', 'text': file_info, 'text_align': 'right'})
 endfunction
